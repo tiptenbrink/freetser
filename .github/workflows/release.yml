@@ -1,0 +1,59 @@
+name: "Publish"
+
+on:
+  push:
+    tags:
+      # Publish on any tag starting with a `v`, e.g., v0.1.0
+      - v*
+
+jobs:
+  check-ci:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Check CI status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          echo "Checking CI status for commit: $COMMIT_SHA"
+
+          # Check if there's a successful Tests workflow run for this commit
+          RESULT=$(gh run list --workflow=test.yml --commit="$COMMIT_SHA" --status=success --limit=1 --json conclusion --jq '.[0].conclusion')
+
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::CI has not passed for this commit."
+            echo "Please ensure the Tests workflow passes before creating a release tag."
+            exit 1
+          fi
+
+          echo "CI passed for this commit!"
+
+  run:
+    needs: check-ci
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
+        with:
+          enable-cache: false
+          save-cache: false
+          version: "0.9.11"
+      - name: Install Python 3.14t
+        run: uv python install 3.14t
+      - name: Build
+        run: uv build
+      # Check that basic features work and we didn't miss to include crucial files
+      - name: Smoke test (wheel)
+        run: uv run --isolated --no-project --with dist/*.whl tests/smoke_test.py
+      - name: Smoke test (source distribution)
+        run: uv run --isolated --no-project --with dist/*.tar.gz tests/smoke_test.py
+      - name: Publish
+        run: uv publish
