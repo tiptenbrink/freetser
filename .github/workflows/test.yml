@@ -1,0 +1,70 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1e862dfacbd1d6d858c55d9b792c756523627244
+        with:
+          enable-cache: true
+          version: "0.9.11"
+          prune-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.14t
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Start HTTP server
+        run: |
+          nohup uv run tests/main.py > server.log 2>&1 &
+          echo $! > server.pid
+
+          # Wait for server to be ready with health check
+          echo "Waiting for HTTP server to start..."
+          for i in {1..5}; do
+            if curl -f http://localhost:8000/ >/dev/null 2>&1; then
+              echo "HTTP server is ready!"
+              break
+            fi
+            if [ $i -eq 5 ]; then
+              echo "HTTP server failed to start within 30 seconds"
+              cat server.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run pytest
+        run: uv run pytest -v
+
+      - name: Output server log
+        if: success() || failure()
+        run: cat server.log
+
+      - name: Upload server logs as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: server.log
+          if-no-files-found: ignore
+
+      - name: Cleanup server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill $(cat server.pid) || true
+          fi

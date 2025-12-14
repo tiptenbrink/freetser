@@ -1,0 +1,36 @@
+[build-system]
+requires = ["uv_build>=0.9.11,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "freetser"
+version = "0.1.0"
+description = "A free-threaded HTTP server built on top of h11"
+authors = [
+    { name = "Tip ten Brink", email = "tip@tenbrinkmeijs.com" },
+]
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "h11>=0.16.0,<0.17.0",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.34.0",
+    "httpx>=0.28.1",
+    "pytest>=9.0.1",
+    "ruff>=0.14.6",
+]
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+pythonVersion = "3.14"
+include = ["src", "tests"]
+exclude = ["**/__pycache__", ".venv", "**/.venv"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
