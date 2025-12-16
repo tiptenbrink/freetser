@@ -26,11 +26,10 @@ from freetser import (
     Request,
     Response,
     ServerConfig,
-    Storage,
+    StorageQueue,
     setup_logging,
     start_server,
 )
-from freetser.server import StorageQueue
 
 logger = logging.getLogger("freetser.handler")
 
@@ -62,7 +61,20 @@ Then if you do `uv run main.py`, it will start the server on the default port of
 
 ## Using the built-in storage
 
-`freetser` provides a built-in key-value (KV) store built on top of SQLite. It is not designed for speed, but for simplicity. First, define a database routine:
+`freetser` provides a built-in key-value (KV) store built on top of SQLite. It is not designed for speed, but for simplicity. First, start the storage thread before starting the server:
+
+```python
+from freetser import start_storage_thread, start_server, ServerConfig
+
+# Start the storage thread (do this before starting the server)
+store_queue = start_storage_thread(db_file="mydb.sqlite", db_tables=["USERS"])
+
+# Pass the queue to the server
+config = ServerConfig(port=8000)
+start_server(config, handler, store_queue=store_queue)
+```
+
+Then, define a database routine:
 
 ```python
 def get_or_create(store: Storage) -> str:
@@ -85,6 +97,23 @@ This has some important consequences:
 - Furthermore, try to only perform simple logic in the routines. Since we only have 1 database thread, all other threads have to wait on your routine to finish. So don't make any HTTP calls or other blocking requests. Put those in the handler instead. If this is a limitation, **don't use this library**. This library is explicitly not designed for highly concurrent use cases or high performance applications with hundreds of thousands of users. However, it should handle thousands just fine.
 
 For more examples, see `main.py` in the tests directory or check out the tests themselves.
+
+## Development
+
+To run the linters and type checker:
+
+```bash
+uv run ruff check      # Linting
+uv run ruff format     # Code formatting
+uv run basedpyright    # Type checking
+```
+
+To run the tests, first start the test server in the background, then run pytest:
+
+```bash
+uv run python tests/main.py &   # Start test server (optionally pass a port number)
+uv run pytest tests/ -v         # Run tests
+```
 
 ## Benchmarks
 

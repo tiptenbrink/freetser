@@ -2,8 +2,10 @@ from .server import (
     Request,
     Response,
     ServerConfig,
+    StorageQueue,
     setup_logging,
     start_server,
+    start_storage_thread,
 )
 from .storage import (
     EntryAlreadyExists,
@@ -13,7 +15,9 @@ from .storage import (
 
 __all__ = [
     "start_server",
+    "start_storage_thread",
     "ServerConfig",
+    "StorageQueue",
     "Request",
     "Response",
     "setup_logging",

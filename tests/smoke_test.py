@@ -10,14 +10,18 @@ def test_imports() -> None:
         ServerConfig,
         Storage,
         StorageError,
+        StorageQueue,
         setup_logging,
         start_server,
+        start_storage_thread,
     )
 
     # Verify the imports are the expected types
     assert callable(start_server)
+    assert callable(start_storage_thread)
     assert callable(setup_logging)
     assert isinstance(ServerConfig, type)
+    assert isinstance(StorageQueue, type)
     assert isinstance(Request, type)
     assert isinstance(Response, type)
     assert isinstance(Storage, type)

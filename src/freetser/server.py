@@ -26,10 +26,6 @@ class ServerConfig:
     max_body_size: int = 2 * 1024 * 1024
     # Parameter passed to `socket.listen()`
     listen_backlog: int = 1024
-    # Path to sqlite database file, will be created if it does not exist
-    db_file: str | None = None
-    # All tables that must be present, will be created if they do not exist
-    db_tables: list[str] | None = None
 
 
 @dataclass
@@ -317,7 +313,12 @@ class QueueItem[T]:
     exception: storage.StorageError | None = None
 
 
-def run_store(store_queue: StorageQueue, db_file: str, db_tables: list[str] | None):
+def run_store(
+    store_queue: StorageQueue,
+    db_file: str,
+    db_tables: list[str] | None,
+    ready_event: threading.Event | None = None,
+):
     if db_file == ":memory:":
         # Special string that opens a new database in memory
         path = db_file
@@ -329,6 +330,10 @@ def run_store(store_queue: StorageQueue, db_file: str, db_tables: list[str] | No
         path = path_parent.joinpath(path.parts[-1])
     store = storage.Storage(db_path=path, tables=db_tables)
     logger.info(f"Opened SQLite database at {path}.")
+
+    if ready_event is not None:
+        ready_event.set()
+
     while True:
         try:
             # We put a timeout just so that we occasionally do something in this thread
@@ -358,10 +363,39 @@ def run_store(store_queue: StorageQueue, db_file: str, db_tables: list[str] | No
         item.event.set()
 
 
+def start_storage_thread(
+    db_file: str,
+    db_tables: list[str] | None = None,
+) -> StorageQueue:
+    """Start the storage thread and return the queue for communicating with it.
+
+    This function creates a StorageQueue and starts a daemon thread that processes
+    database operations. The function blocks until the storage thread is ready to
+    accept requests. The thread runs until the process exits.
+
+    Args:
+        db_file: Path to the SQLite database file. Use ":memory:" for an in-memory database.
+        db_tables: List of table names to create if they don't exist.
+
+    Returns:
+        StorageQueue that can be passed to start_server() or used directly.
+    """
+    store_queue = StorageQueue()
+    ready_event = threading.Event()
+    threading.Thread(
+        target=run_store,
+        args=(store_queue, db_file, db_tables, ready_event),
+        daemon=True,
+    ).start()
+    ready_event.wait()
+    return store_queue
+
+
 def start_server(
     config: ServerConfig,
     handler: Handler,
     ready_event: threading.Event | None = None,
+    store_queue: StorageQueue | None = None,
 ):
     """Start the HTTP server and begin accepting connections.
 
@@ -370,6 +404,9 @@ def start_server(
         handler: Function called to handle each request and produce a response.
         ready_event: If provided, this event is set once the server is ready to
             accept connections (after socket binding and before the accept loop).
+        store_queue: Optional StorageQueue for database operations. If provided,
+            this queue will be passed to the handler. Create one using
+            start_storage_thread().
     """
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -378,20 +415,6 @@ def start_server(
 
     logger.info(f"Server listening on {config.host}:{config.port}")
     logger.info(f"Limits: Header={config.max_header_size}, Body={config.max_body_size}")
-
-    # We run 1 thread that has access to the SQLite database
-    # This ensures every operation is atomic
-    # Procedures are sent through the `store_queue`
-    # `daemon=True` ensures that we do not wait for the thread to finish when exiting
-    if config.db_file is not None:
-        store_queue = StorageQueue()
-        threading.Thread(
-            target=run_store,
-            args=(store_queue, config.db_file, config.db_tables),
-            daemon=True,
-        ).start()
-    else:
-        store_queue = None
 
     if ready_event is not None:
         ready_event.set()

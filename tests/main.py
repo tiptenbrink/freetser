@@ -6,10 +6,11 @@ from freetser import (
     Response,
     ServerConfig,
     Storage,
+    StorageQueue,
     setup_logging,
     start_server,
+    start_storage_thread,
 )
-from freetser.server import StorageQueue
 
 logger = logging.getLogger("freetser.handler")
 
@@ -90,12 +91,19 @@ def handler(req: Request, store_queue: StorageQueue | None) -> Response:
 
 
 def main():
+    import sys
+
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+
     listener = setup_logging()
     listener.start()
 
-    config = ServerConfig(db_file="db.sqlite", db_tables=["USERS"])
+    # Start the storage thread first
+    store_queue = start_storage_thread(db_file="db.sqlite", db_tables=["USERS"])
+
+    config = ServerConfig(port=port)
     try:
-        start_server(config, handler)
+        start_server(config, handler, store_queue=store_queue)
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:

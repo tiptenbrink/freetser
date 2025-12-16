@@ -2,9 +2,12 @@
 requires = ["uv_build>=0.9.11,<0.10.0"]
 build-backend = "uv_build"
 
+[tool.uv.build-backend]
+source-include = ["CHANGELOG.md"]
+
 [project]
 name = "freetser"
-version = "0.1.0"
+version = "0.2.0"
 description = "A free-threaded HTTP server built on top of h11"
 authors = [
     { name = "Tip ten Brink", email = "tip@tenbrinkmeijs.com" },
