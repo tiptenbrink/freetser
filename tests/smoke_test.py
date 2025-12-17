@@ -11,6 +11,8 @@ def test_imports() -> None:
         Storage,
         StorageError,
         StorageQueue,
+        TcpServerConfig,
+        UnixServerConfig,
         setup_logging,
         start_server,
         start_storage_thread,
@@ -21,6 +23,8 @@ def test_imports() -> None:
     assert callable(start_storage_thread)
     assert callable(setup_logging)
     assert isinstance(ServerConfig, type)
+    assert isinstance(TcpServerConfig, type)
+    assert isinstance(UnixServerConfig, type)
     assert isinstance(StorageQueue, type)
     assert isinstance(Request, type)
     assert isinstance(Response, type)

@@ -25,8 +25,8 @@ import logging
 from freetser import (
     Request,
     Response,
-    ServerConfig,
     StorageQueue,
+    TcpServerConfig,
     setup_logging,
     start_server,
 )
@@ -44,7 +44,7 @@ def main():
     listener = setup_logging()
     listener.start()
 
-    config = ServerConfig(port=8000)
+    config = TcpServerConfig(port=8000)
     try:
         start_server(config, handler)
     except KeyboardInterrupt:
@@ -64,14 +64,23 @@ Then if you do `uv run main.py`, it will start the server on the default port of
 `freetser` provides a built-in key-value (KV) store built on top of SQLite. It is not designed for speed, but for simplicity. First, start the storage thread before starting the server:
 
 ```python
-from freetser import start_storage_thread, start_server, ServerConfig
+from freetser import start_storage_thread, start_server, TcpServerConfig
 
 # Start the storage thread (do this before starting the server)
 store_queue = start_storage_thread(db_file="mydb.sqlite", db_tables=["USERS"])
 
 # Pass the queue to the server
-config = ServerConfig(port=8000)
+config = TcpServerConfig(port=8000)
 start_server(config, handler, store_queue=store_queue)
+```
+
+You can also use a Unix domain socket instead of TCP:
+
+```python
+from freetser import start_server, UnixServerConfig
+
+config = UnixServerConfig(path="/tmp/myserver.sock")
+start_server(config, handler)
 ```
 
 Then, define a database routine:

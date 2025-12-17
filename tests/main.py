@@ -4,9 +4,9 @@ import threading
 from freetser import (
     Request,
     Response,
-    ServerConfig,
     Storage,
     StorageQueue,
+    TcpServerConfig,
     setup_logging,
     start_server,
     start_storage_thread,
@@ -101,7 +101,7 @@ def main():
     # Start the storage thread first
     store_queue = start_storage_thread(db_file="db.sqlite", db_tables=["USERS"])
 
-    config = ServerConfig(port=port)
+    config = TcpServerConfig(port=port)
     try:
         start_server(config, handler, store_queue=store_queue)
     except KeyboardInterrupt:

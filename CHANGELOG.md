@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0]
+
+### Breaking Changes
+
+- **`ServerConfig` split into `TcpServerConfig` and `UnixServerConfig`**: The base `ServerConfig` class now only contains shared settings. Use `TcpServerConfig` for TCP sockets or `UnixServerConfig` for Unix domain sockets.
+
+  **Before:**
+  ```python
+  config = ServerConfig(host="127.0.0.1", port=8000)
+  start_server(config, handler)
+  ```
+
+  **After (TCP):**
+  ```python
+  config = TcpServerConfig(host="127.0.0.1", port=8000)
+  start_server(config, handler)
+  ```
+
+  **After (Unix domain socket):**
+  ```python
+  config = UnixServerConfig(path="/tmp/myserver.sock")
+  start_server(config, handler)
+  ```
+
+### Added
+
+- `TcpServerConfig`: Configuration class for TCP sockets with `host` and `port` fields.
+- `UnixServerConfig`: Configuration class for Unix domain sockets with `path` field.
+- Unix domain socket support: The server can now listen on a Unix domain socket instead of a TCP socket.
+
 ## [0.2.0]
 
 ### Breaking Changes

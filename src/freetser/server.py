@@ -20,12 +20,27 @@ logger = logging.getLogger("freetser.server")
 
 @dataclass
 class ServerConfig:
-    host: str = "127.0.0.1"
-    port: int = 8000
+    """Base server configuration with shared settings."""
+
     max_header_size: int = 16 * 1024
     max_body_size: int = 2 * 1024 * 1024
     # Parameter passed to `socket.listen()`
     listen_backlog: int = 1024
+
+
+@dataclass
+class TcpServerConfig(ServerConfig):
+    """Server configuration for TCP sockets."""
+
+    host: str = "127.0.0.1"
+    port: int = 8000
+
+
+@dataclass
+class UnixServerConfig(ServerConfig):
+    """Server configuration for Unix domain sockets."""
+
+    path: str = "/tmp/freetser.sock"
 
 
 @dataclass
@@ -400,7 +415,7 @@ def start_server(
     """Start the HTTP server and begin accepting connections.
 
     Args:
-        config: Server configuration options.
+        config: Server configuration options (TcpServerConfig or UnixServerConfig).
         handler: Function called to handle each request and produce a response.
         ready_event: If provided, this event is set once the server is ready to
             accept connections (after socket binding and before the accept loop).
@@ -408,12 +423,24 @@ def start_server(
             this queue will be passed to the handler. Create one using
             start_storage_thread().
     """
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((config.host, config.port))
-    server_socket.listen(config.listen_backlog)
+    socket_path: Path | None = None
 
-    logger.info(f"Server listening on {config.host}:{config.port}")
+    if isinstance(config, UnixServerConfig):
+        server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        socket_path = Path(config.path)
+        # Remove existing socket file if it exists
+        socket_path.unlink(missing_ok=True)
+        server_socket.bind(config.path)
+        logger.info(f"Server listening on unix:{config.path}")
+    elif isinstance(config, TcpServerConfig):
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind((config.host, config.port))
+        logger.info(f"Server listening on {config.host}:{config.port}")
+    else:
+        raise TypeError(f"config must be TcpServerConfig or UnixServerConfig, got {type(config).__name__}")
+
+    server_socket.listen(config.listen_backlog)
     logger.info(f"Limits: Header={config.max_header_size}, Body={config.max_body_size}")
 
     if ready_event is not None:
@@ -434,3 +461,5 @@ def start_server(
         pass
     finally:
         server_socket.close()
+        if socket_path is not None:
+            socket_path.unlink(missing_ok=True)
