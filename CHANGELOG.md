@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1]
+
+### Changed
+
+- **Improved connection logging**: Connection logs now include the server's listening address, making it easier to identify which server instance received a connection when running multiple freetser instances.
+
+  **TCP:**
+  ```
+  [127.0.0.1:8000] Connection from 127.0.0.1:36954
+  ```
+
+  **Unix socket:**
+  ```
+  [unix:/tmp/myserver.sock] Connection from unix socket
+  ```
+
 ## [0.3.0]
 
 ### Breaking Changes

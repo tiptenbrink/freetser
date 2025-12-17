@@ -101,9 +101,19 @@ class Response:
 @dataclass
 class ConnectionContext:
     client_socket: socket.socket
-    client_address: tuple
+    client_address: tuple | str
     store_queue: StorageQueue | None
     config: ServerConfig
+    server_address: str = ""
+    is_unix_socket: bool = False
+
+    def format_client_address(self) -> str:
+        """Format the client address for logging."""
+        if self.is_unix_socket:
+            return "unix socket"
+        if isinstance(self.client_address, tuple) and len(self.client_address) >= 2:
+            return f"{self.client_address[0]}:{self.client_address[1]}"
+        return str(self.client_address)
 
 
 def setup_logging() -> QueueListener:
@@ -128,7 +138,7 @@ type Handler = Callable[[Request, StorageQueue | None], Response]
 
 
 def handle_client(ctx: ConnectionContext, handler: Handler):
-    logger.info(f"Connection from {ctx.client_address}")
+    logger.info(f"[{ctx.server_address}] Connection from {ctx.format_client_address()}")
     conn = h11.Connection(
         h11.SERVER, max_incomplete_event_size=ctx.config.max_header_size
     )
@@ -431,12 +441,14 @@ def start_server(
         # Remove existing socket file if it exists
         socket_path.unlink(missing_ok=True)
         server_socket.bind(config.path)
-        logger.info(f"Server listening on unix:{config.path}")
+        server_address = f"unix:{config.path}"
+        logger.info(f"Server listening on {server_address}")
     elif isinstance(config, TcpServerConfig):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.bind((config.host, config.port))
-        logger.info(f"Server listening on {config.host}:{config.port}")
+        server_address = f"{config.host}:{config.port}"
+        logger.info(f"Server listening on {server_address}")
     else:
         raise TypeError(f"config must be TcpServerConfig or UnixServerConfig, got {type(config).__name__}")
 
@@ -446,12 +458,16 @@ def start_server(
     if ready_event is not None:
         ready_event.set()
 
+    is_unix = socket_path is not None
+
     try:
         # This is the main accept loop, we create a new thread for every new connection
         while True:
             try:
                 client, addr = server_socket.accept()
-                ctx = ConnectionContext(client, addr, store_queue, config)
+                ctx = ConnectionContext(
+                    client, addr, store_queue, config, server_address, is_unix
+                )
                 threading.Thread(
                     target=handle_client, args=(ctx, handler), daemon=True
                 ).start()
