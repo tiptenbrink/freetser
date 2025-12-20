@@ -13,6 +13,7 @@ def test_imports() -> None:
         StorageQueue,
         TcpServerConfig,
         UnixServerConfig,
+        client,
         setup_logging,
         start_server,
         start_storage_thread,
@@ -31,6 +32,11 @@ def test_imports() -> None:
     assert isinstance(Storage, type)
     assert isinstance(StorageError, type)
     assert isinstance(EntryAlreadyExists, type)
+
+    # Verify client module
+    assert isinstance(client.Connection, type)
+    assert isinstance(client.TcpAddress, type)
+    assert isinstance(client.UnixAddress, type)
 
 
 if __name__ == "__main__":

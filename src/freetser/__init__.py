@@ -1,6 +1,7 @@
-from .server import (
+from freetser import client
+from freetser.core import Response
+from freetser.server import (
     Request,
-    Response,
     ServerConfig,
     StorageQueue,
     TcpServerConfig,
@@ -9,13 +10,14 @@ from .server import (
     start_server,
     start_storage_thread,
 )
-from .storage import (
+from freetser.storage import (
     EntryAlreadyExists,
     Storage,
     StorageError,
 )
 
 __all__ = [
+    "client",
     "start_server",
     "start_storage_thread",
     "ServerConfig",

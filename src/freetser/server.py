@@ -1,4 +1,3 @@
-import json
 import logging
 import queue
 import socket
@@ -8,13 +7,13 @@ from dataclasses import dataclass, field
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 from queue import SimpleQueue
-from typing import Callable, Optional, cast
+from typing import Callable
 
 import h11
 
 import freetser.storage as storage
+from freetser.core import Response, get_next_event
 
-MAX_RECV = 2**16
 logger = logging.getLogger("freetser.server")
 
 
@@ -49,53 +48,6 @@ class Request:
     path: str
     headers: list[tuple[bytes, bytes]]
     body: bytes
-
-
-@dataclass
-class Response:
-    status_code: int
-    headers: list[tuple[bytes, bytes]]
-    body: bytes
-
-    @staticmethod
-    def text(content: str, status_code: int = 200) -> "Response":
-        body = content.encode("utf-8")
-        return Response(
-            status_code=status_code,
-            headers=[
-                (b"Content-Type", b"text/plain; charset=utf-8"),
-                (b"Content-Length", str(len(body)).encode("ascii")),
-            ],
-            body=body,
-        )
-
-    @staticmethod
-    def empty(
-        headers: list[tuple[bytes, bytes]] | None = None, status_code: int = 200
-    ) -> "Response":
-        if headers is None:
-            headers = []
-        headers.append(
-            (b"Content-Length", "0".encode("ascii")),
-        )
-        return Response(status_code=status_code, headers=headers, body=b"")
-
-    @staticmethod
-    def json(
-        content,
-        headers: list[tuple[bytes, bytes]] | None = None,
-        status_code: int = 200,
-    ) -> "Response":
-        if headers is None:
-            headers = []
-        body = json.dumps(content).encode("utf-8")
-        headers.append(
-            (b"Content-Length", str(len(body)).encode("ascii")),
-        )
-        headers.append(
-            (b"Content-Type", b"application/json"),
-        )
-        return Response(status_code=status_code, headers=headers, body=body)
 
 
 @dataclass
@@ -223,25 +175,6 @@ def handle_request_response(
 
     send_response(conn, ctx, resp)
     return True
-
-
-def get_next_event(conn: h11.Connection, sock: socket.socket) -> Optional[h11.Event]:
-    while True:
-        event = conn.next_event()
-        # We shouldn't ever be paused here because then we didn't properly call start_next_cycle
-        assert event is not h11.PAUSED
-        if event is h11.NEED_DATA:
-            try:
-                data = sock.recv(MAX_RECV)
-                # `receive_data` sees an empty `bytes` object as EOF, which matches `recv`
-                conn.receive_data(data)
-            except Exception as e:
-                logger.error(f"Socket error: {e}")
-                return None
-        else:
-            # We know it has to be Event in this case
-            # Unfortunately the 'sentinel' stuff means the type checker cannot narrow properly
-            return cast(h11.Event, event)
 
 
 def read_request_body(conn: h11.Connection, ctx: ConnectionContext) -> bytes:
