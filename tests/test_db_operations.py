@@ -15,13 +15,17 @@ def test_get_creates_item(base_url: str):
 def test_post_creates_and_updates(base_url: str):
     """Test POST creates or updates item."""
     # First POST should create
-    resp = requests.post(f"{base_url}/stress-test/test2", data=b"hello world", timeout=5.0)
+    resp = requests.post(
+        f"{base_url}/stress-test/test2", data=b"hello world", timeout=5.0
+    )
     print(f"\nPOST /stress-test/test2: {resp.status_code}")
     print(f"Response: {resp.text}")
     assert resp.status_code == 200
 
     # Second POST should update
-    resp = requests.post(f"{base_url}/stress-test/test2", data=b"updated data", timeout=5.0)
+    resp = requests.post(
+        f"{base_url}/stress-test/test2", data=b"updated data", timeout=5.0
+    )
     print(f"POST /stress-test/test2 (update): {resp.status_code}")
     print(f"Response: {resp.text}")
     assert resp.status_code in (200, 409)  # Either success or conflict

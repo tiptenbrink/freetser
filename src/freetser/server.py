@@ -450,7 +450,9 @@ def start_server(
         server_address = f"{config.host}:{config.port}"
         logger.info(f"Server listening on {server_address}")
     else:
-        raise TypeError(f"config must be TcpServerConfig or UnixServerConfig, got {type(config).__name__}")
+        raise TypeError(
+            f"config must be TcpServerConfig or UnixServerConfig, got {type(config).__name__}"
+        )
 
     server_socket.listen(config.listen_backlog)
     logger.info(f"Limits: Header={config.max_header_size}, Body={config.max_body_size}")
