@@ -13,7 +13,7 @@ def test_simple_get_request(base_url: str):
     response = requests.get(f"{base_url}/test", timeout=5.0)
 
     assert response.status_code == 200
-    assert "Hello from pyht!" in response.text
+    assert "Hello from freetser!" in response.text
     assert "Method: GET" in response.text
     assert "Path: /test" in response.text
     assert "Body length: 0 bytes" in response.text
@@ -25,7 +25,7 @@ def test_post_request_with_body(base_url: str):
     response = requests.post(f"{base_url}/api/submit", data=test_data, timeout=5.0)
 
     assert response.status_code == 200
-    assert "Hello from pyht!" in response.text
+    assert "Hello from freetser!" in response.text
     assert "Method: POST" in response.text
     assert "Path: /api/submit" in response.text
     assert f"Body length: {len(test_data)} bytes" in response.text
@@ -38,7 +38,7 @@ def test_different_paths(base_url: str):
     for path in paths:
         response = requests.get(f"{base_url}{path}", timeout=5.0)
         assert response.status_code == 200
-        assert "Hello from pyht!" in response.text
+        assert "Hello from freetser!" in response.text
         assert f"Path: {path}" in response.text
 
 
@@ -47,7 +47,7 @@ def test_root_path(base_url: str):
     response = requests.get(f"{base_url}/", timeout=5.0)
 
     assert response.status_code == 200
-    assert "Hello from pyht!" in response.text
+    assert "Hello from freetser!" in response.text
     assert "Path: /" in response.text
 
 
@@ -72,7 +72,7 @@ def test_concurrent_requests():
     # Verify all requests succeeded
     for status_code, body in results:
         assert status_code == 200
-        assert "Hello from pyht!" in body
+        assert "Hello from freetser!" in body
         assert "Thread:" in body
 
 
@@ -82,7 +82,7 @@ def test_large_post_body(base_url: str):
     response = requests.post(f"{base_url}/upload", data=large_data, timeout=5.0)
 
     assert response.status_code == 200
-    assert "Hello from pyht!" in response.text
+    assert "Hello from freetser!" in response.text
     assert "Method: POST" in response.text
     assert "Body length: 1024 bytes" in response.text
 

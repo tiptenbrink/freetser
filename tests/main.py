@@ -82,7 +82,7 @@ def handler(req: Request, store_queue: StorageQueue | None) -> Response:
         return Response.text(text)
 
     text = (
-        f"Hello from pyht!\nThread: {threading.current_thread().name}\n"
+        f"Hello from freetser!\nThread: {threading.current_thread().name}\n"
         f"Method: {req.method}\nPath: {req.path}\n"
         f"Body length: {len(req.body)} bytes\n"
     )
@@ -93,7 +93,7 @@ def handler(req: Request, store_queue: StorageQueue | None) -> Response:
 def main():
     import sys
 
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8020
 
     listener = setup_logging()
     listener.start()

@@ -114,7 +114,7 @@ To run the linters and type checker:
 ```bash
 uv run ruff check      # Linting
 uv run ruff format     # Code formatting
-uv run basedpyright    # Type checking
+uv run ty check        # Type checking
 ```
 
 To run the tests, first start the test server in the background, then run pytest:

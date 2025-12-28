@@ -41,7 +41,7 @@ class Storage:
         # writers.
         conn = sqlite3.connect(
             db_path,
-            autocommit=sqlite3.LEGACY_TRANSACTION_CONTROL,  # pyright: ignore [reportArgumentType]
+            autocommit=sqlite3.LEGACY_TRANSACTION_CONTROL,  # ty: ignore[invalid-argument-type]
             isolation_level=None,
         )
         conn.execute("PRAGMA journal_mode = WAL;")
