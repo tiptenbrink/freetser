@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from .conftest import SERVER_URL
+from .conftest import SERVER_PORT, SERVER_URL
 
 
 def test_simple_get_request(base_url: str):
@@ -139,7 +139,7 @@ def test_http_10_rejected():
     # Create a raw HTTP/1.0 request
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(2.0)  # Set timeout to avoid hanging
-    sock.connect(("localhost", 8000))
+    sock.connect(("localhost", int(SERVER_PORT)))
 
     # Send HTTP/1.0 request
     request = b"GET /test HTTP/1.0\r\nHost: localhost\r\n\r\n"
@@ -208,7 +208,7 @@ def test_error_response_closes_connection():
     # Test with HTTP/1.0 which triggers an error
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(2.0)
-    sock.connect(("localhost", 8000))
+    sock.connect(("localhost", int(SERVER_PORT)))
 
     request = b"GET /test HTTP/1.0\r\nHost: localhost\r\n\r\n"
     sock.sendall(request)

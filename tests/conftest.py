@@ -1,9 +1,12 @@
 """Shared pytest fixtures for all tests"""
 
+import os
+
 import pytest
 import requests
 
-SERVER_URL = "http://localhost:8000"
+SERVER_PORT = os.environ.get("FREETSER_TEST_PORT", "8020")
+SERVER_URL = f"http://localhost:{SERVER_PORT}"
 
 
 @pytest.fixture
