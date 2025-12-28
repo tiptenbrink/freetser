@@ -1,3 +1,13 @@
+import sys
+
+if sys._is_gil_enabled():
+    print(
+        "ERROR: Free-threading is disabled (GIL is enabled). "
+        "freetser requires a free-threaded build of Python (preferably 3.14t+).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 from .server import (
     Request,
     Response,
