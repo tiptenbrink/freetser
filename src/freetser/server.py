@@ -34,6 +34,25 @@ class TcpServerConfig(ServerConfig):
 
     host: str = "127.0.0.1"
     port: int = 8000
+    # Disable Nagle's algorithm (TCP_NODELAY). Without this, the kernel buffers
+    # small writes for up to ~200ms hoping to coalesce them, adding latency to
+    # HTTP responses. Set on the listening socket and inherited by accepted connections.
+    tcp_nodelay: bool = True
+    # Send periodic probes on idle connections to detect dead peers (e.g. client
+    # crash, network drop). Total detection time: time + intvl * probes.
+    tcp_keepalive: bool = True
+    # Seconds idle before the first keepalive probe (TCP_KEEPIDLE). The system
+    # default is 2 hours, which is far too slow for most applications.
+    tcp_keepalive_time: int = 60
+    # Seconds between subsequent probes (TCP_KEEPINTVL).
+    tcp_keepalive_intvl: int = 10
+    # Unacknowledged probes before dropping the connection (TCP_KEEPCNT).
+    tcp_keepalive_probes: int = 3
+    # TCP_USER_TIMEOUT: abort when transmitted data goes unacknowledged for this
+    # many seconds. Keepalive only fires when the socket is *idle* — if there is
+    # outstanding data, the kernel retransmits instead (for up to ~15 min by
+    # default via tcp_retries2). This option closes that gap. 0 to disable.
+    tcp_user_timeout: int = 90
 
 
 @dataclass
@@ -446,6 +465,35 @@ def start_server(
     elif isinstance(config, TcpServerConfig):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if config.tcp_nodelay:
+            server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        if config.tcp_keepalive:
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            # Not all platforms support per-socket keepalive tuning; if
+            # unavailable, SO_KEEPALIVE above still works with system defaults.
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                server_socket.setsockopt(
+                    socket.IPPROTO_TCP,
+                    socket.TCP_KEEPIDLE,
+                    config.tcp_keepalive_time,
+                )
+                server_socket.setsockopt(
+                    socket.IPPROTO_TCP,
+                    socket.TCP_KEEPINTVL,
+                    config.tcp_keepalive_intvl,
+                )
+                server_socket.setsockopt(
+                    socket.IPPROTO_TCP,
+                    socket.TCP_KEEPCNT,
+                    config.tcp_keepalive_probes,
+                )
+        # Not all platforms support TCP_USER_TIMEOUT; silently skip if unavailable.
+        if config.tcp_user_timeout > 0 and hasattr(socket, "TCP_USER_TIMEOUT"):
+            server_socket.setsockopt(
+                socket.IPPROTO_TCP,
+                socket.TCP_USER_TIMEOUT,
+                config.tcp_user_timeout * 1000,
+            )
         server_socket.bind((config.host, config.port))
         server_address = f"{config.host}:{config.port}"
         logger.info(f"Server listening on {server_address}")
