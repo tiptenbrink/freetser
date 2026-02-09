@@ -46,6 +46,15 @@ jobs:
           enable-cache: false
           save-cache: false
           version: "0.9.11"
+      - name: Verify tag matches pyproject.toml version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          VERSION=$(uv version --output-format json | jq -r .version)
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Tag v$TAG does not match pyproject.toml version $VERSION"
+            exit 1
+          fi
+          echo "Tag v$TAG matches pyproject.toml version $VERSION"
       - name: Install Python 3.14t
         run: uv python install 3.14t
       - name: Build
