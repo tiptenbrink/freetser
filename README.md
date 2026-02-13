@@ -275,11 +275,14 @@ uv run ruff format     # Code formatting
 uv run ty check        # Type checking
 ```
 
-Run tests:
+Run tests (start the test server in one terminal, then run pytest in another):
 
 ```bash
-uv run python tests/main.py &   # Start test server (optionally pass a port number)
-uv run pytest tests/ -v         # Run tests
+# Terminal 1: start the test server
+uv run python tests/main.py     # optionally pass a port number
+
+# Terminal 2: run tests
+uv run pytest tests/
 ```
 
 ## Benchmarks

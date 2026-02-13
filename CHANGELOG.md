@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1]
+
+### Added
+
+- **TCP keepalive**: `TcpServerConfig` now enables TCP keepalive by default, with configurable idle time (`tcp_keepalive_time`, default 60s), probe interval (`tcp_keepalive_intvl`, default 10s), and probe count (`tcp_keepalive_probes`, default 3). This detects dead peers (e.g. client crash, network drop) much faster than the OS default of 2 hours.
+- **TCP_NODELAY**: Nagle's algorithm is now disabled by default (`tcp_nodelay=True`), potentially reducing latency on small HTTP responses.
+- **TCP_USER_TIMEOUT**: Configurable timeout (`tcp_user_timeout`, default 90s) for unacknowledged data, closing the gap where keepalive doesn't fire during active retransmission.
+
+## [0.3.2]
+
+### Added
+
+- **Free-threaded Python check**: freetser now checks on import that the GIL is disabled and exits with a clear error message if not. This prevents confusing runtime errors when accidentally using a non-free-threaded build.
+- **`py.typed` marker**: Added PEP 561 marker file so type checkers recognize freetser as a typed package.
+
+### Changed
+
+- **Type checker migration**: Switched from basedpyright to [ty](https://github.com/astral-sh/ty) for type checking.
+- **Test port**: Test server now defaults to port 8020 (configurable via `FREETSER_TEST_PORT` environment variable) to avoid conflicts with running applications.
+
 ## [0.3.1]
 
 ### Changed
