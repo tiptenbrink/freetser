@@ -25,6 +25,12 @@ class EntryAlreadyExists(StorageError):
     pass
 
 
+class UpdateCounterMismatch(StorageError):
+    """Raised when trying to update with a stale counter value."""
+
+    pass
+
+
 class Storage:
     """
     Creates the necessary tables and sets up connections.
@@ -139,7 +145,12 @@ class Storage:
         value: bytes,
         counter: int,
         expires_at=0,
-        assert_updated: bool = True,
+    ) -> None:
+        if not self.try_update(table_name, key, value, counter, expires_at):
+            raise UpdateCounterMismatch(f"Counter mismatch for key: {key}")
+
+    def try_update(
+        self, table_name: str, key: str, value: bytes, counter: int, expires_at=0
     ) -> bool:
         cursor = self.conn.execute(
             f"""
@@ -149,10 +160,36 @@ class Storage:
             """,
             (value, expires_at, key, counter),
         )
-        result = cursor.rowcount == 1
-        if assert_updated:
-            assert result
-        return result
+
+        if cursor.rowcount > 1:
+            raise sqlite3.ProgrammingError
+
+        return cursor.rowcount == 1
+
+    def overwrite(
+        self,
+        table_name: str,
+        key: str,
+        value: bytes,
+        expires_at=0,
+    ) -> None:
+        """Insert a key if missing, otherwise replace the current value.
+
+        This intentionally does not check the stored counter. If the key already
+        exists, the counter is incremented so other code can still observe that
+        the value changed.
+        """
+        self.conn.execute(
+            f"""
+            INSERT INTO {table_name} (key, value, counter, expiration)
+            VALUES (?, ?, 0, ?)
+            ON CONFLICT(key) DO UPDATE
+            SET value = excluded.value,
+                counter = counter + 1,
+                expiration = excluded.expiration
+            """,
+            (key, value, expires_at),
+        )
 
     def delete(self, table_name: str, key: str) -> bool:
         cursor = self.conn.execute(f"DELETE FROM {table_name} WHERE key = ?", (key,))

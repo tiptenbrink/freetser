@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0]
+
+### Breaking Changes
+
+- **Strict `update()` semantics**: The old `assert_updated` option has been replaced by two separate methods. `Storage.update()` is now always strict and raises `UpdateCounterMismatch` when the counter does not match. Use `Storage.try_update()` when a stale counter is expected and should return `False`.
+- **Non-`StorageError` procedure exceptions now kill the storage thread**: If a procedure passed to `StorageQueue.execute()` raises an exception that is not a `StorageError`, that call now raises the original exception and the storage thread stops. Later calls to `execute()` raise `StorageThreadCrashed`. `StorageError` exceptions remain recoverable.
+
+### Added
+
+- `Storage.try_update()`: Non-throwing optimistic-locking update that returns `True` on success and `False` on counter mismatch.
+- `UpdateCounterMismatch`: Raised by `Storage.update()` when the optimistic-lock counter does not match.
+- `StorageThreadCrashed`: Raised when calling `StorageQueue.execute()` after the storage thread has already crashed.
+- `Storage.overwrite()`: Unconditional insert-or-replace primitive for last-writer-wins rows such as caches, indexes, and other derived state. It inserts missing keys, replaces existing values without a counter check, and increments the counter when replacing an existing row.
+
+### Changed
+
+- **Startup failure propagation**: `start_storage_thread()` now raises startup errors directly instead of potentially blocking forever if the storage thread fails during initialization.
+- **Rollback failure chaining**: If a procedure raises and `rollback()` also fails, the rollback error is raised with the original procedure error as its direct cause.
+- **Self-contained test suite**: `uv run pytest` now starts the required test server automatically, and CI no longer launches a separate background server first.
+- README examples now have matching tests in `test_readme_examples.py`. 
+
 ## [0.4.1]
 
 ### Added

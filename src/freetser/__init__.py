@@ -12,6 +12,7 @@ from .server import (
     Request,
     Response,
     ServerConfig,
+    StorageThreadCrashed,
     StorageQueue,
     TcpServerConfig,
     UnixServerConfig,
@@ -23,6 +24,7 @@ from .storage import (
     EntryAlreadyExists,
     Storage,
     StorageError,
+    UpdateCounterMismatch,
 )
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "ServerConfig",
     "TcpServerConfig",
     "UnixServerConfig",
+    "StorageThreadCrashed",
     "StorageQueue",
     "Request",
     "Response",
@@ -38,4 +41,5 @@ __all__ = [
     "Storage",
     "StorageError",
     "EntryAlreadyExists",
+    "UpdateCounterMismatch",
 ]

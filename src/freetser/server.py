@@ -329,18 +329,50 @@ class UnsetType:
 UNSET = UnsetType()
 
 
+class StorageThreadCrashed(RuntimeError):
+    """Raised when the storage thread has crashed and can no longer serve requests."""
+
+    pass
+
+
 class StorageQueue:
-    queue: SimpleQueue
+    queue: SimpleQueue[QueueItem]
 
     def __init__(self):
         self.queue = SimpleQueue()
+        self.crash_lock = threading.Lock()
+        self.crash_exception: BaseException | None = None
+
+    def mark_crashed(self, exc: BaseException) -> None:
+        with self.crash_lock:
+            if self.crash_exception is None:
+                self.crash_exception = exc
+
+    def crashed_exception(self) -> BaseException | None:
+        with self.crash_lock:
+            return self.crash_exception
 
     def execute[T](self, procedure: Callable[[storage.Storage], T]) -> T:
-        """Execute the given function on the storage thread. Can raise a StorageException, in which case the execution was rolled back."""
+        """Execute the given function on the storage thread."""
+        crashed_exception = self.crashed_exception()
+        if crashed_exception is not None:
+            raise StorageThreadCrashed("Storage thread has crashed") from crashed_exception
+
         item: QueueItem[T] = QueueItem(procedure=procedure)
         self.queue.put(item)
-        item.event.wait()
-        # StorageException is caught by the database thread and returned
+
+        while True:
+            if item.event.wait(timeout=0.1):
+                break
+
+            crashed_exception = self.crashed_exception()
+            if crashed_exception is not None:
+                if item.exception is not None:
+                    raise item.exception
+                raise StorageThreadCrashed(
+                    "Storage thread has crashed"
+                ) from crashed_exception
+
         if item.exception is not None:
             raise item.exception
         if isinstance(item.to_return, UnsetType):
@@ -354,7 +386,7 @@ class QueueItem[T]:
     # The `field` is important, since otherwise we share a singel event for all items
     event: threading.Event = field(default_factory=threading.Event)
     to_return: T | UnsetType = UNSET
-    exception: storage.StorageError | None = None
+    exception: BaseException | None = None
 
 
 def run_store(
@@ -363,17 +395,23 @@ def run_store(
     db_tables: list[str] | None,
     ready_event: threading.Event | None = None,
 ):
-    if db_file == ":memory:":
-        # Special string that opens a new database in memory
-        path = db_file
-    else:
-        # Get the absolute path of the parent and then rejoin to make sure what we show is what is
-        # actually used.
-        path = Path(db_file)
-        path_parent = path.parent.resolve(strict=True)
-        path = path_parent.joinpath(path.parts[-1])
-    store = storage.Storage(db_path=path, tables=db_tables)
-    logger.info(f"Opened SQLite database at {path}.")
+    try:
+        if db_file == ":memory:":
+            # Special string that opens a new database in memory
+            path = db_file
+        else:
+            # Get the absolute path of the parent and then rejoin to make sure what we show is what is
+            # actually used.
+            path = Path(db_file)
+            path_parent = path.parent.resolve(strict=True)
+            path = path_parent.joinpath(path.parts[-1])
+        store = storage.Storage(db_path=path, tables=db_tables)
+        logger.info(f"Opened SQLite database at {path}.")
+    except BaseException as e:
+        store_queue.mark_crashed(e)
+        if ready_event is not None:
+            ready_event.set()
+        return
 
     if ready_event is not None:
         ready_event.set()
@@ -391,16 +429,32 @@ def run_store(
         try:
             value = item.procedure(store)
         except storage.StorageError as e:
-            # Rollback the transaction for recoverable errors
-            store.conn.rollback()
-            # Return the error to the caller instead of crashing the storage thread
             item.exception = e
+            try:
+                store.conn.rollback()
+            except BaseException as rollback_error:
+                rollback_error.__cause__ = e
+                rollback_error.__suppress_context__ = True
+                item.exception = rollback_error
+                item.event.set()
+                store_queue.mark_crashed(rollback_error)
+                return
             item.event.set()
             continue
-        except Exception as e:
-            # Still try to rollback if we can
-            store.conn.rollback()
-            raise e
+        except BaseException as e:
+            item.exception = e
+            try:
+                store.conn.rollback()
+            except BaseException as rollback_error:
+                rollback_error.__cause__ = e
+                rollback_error.__suppress_context__ = True
+                item.exception = rollback_error
+                item.event.set()
+                store_queue.mark_crashed(rollback_error)
+                return
+            item.event.set()
+            store_queue.mark_crashed(e)
+            return
 
         store.conn.commit()
         item.to_return = value
@@ -432,6 +486,11 @@ def start_storage_thread(
         daemon=True,
     ).start()
     ready_event.wait()
+
+    crashed_exception = store_queue.crashed_exception()
+    if crashed_exception is not None:
+        raise crashed_exception
+
     return store_queue
 
 

@@ -5,9 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from .conftest import SERVER_PORT, SERVER_URL
-
-
 def test_simple_get_request(base_url: str):
     """Test a simple GET request"""
     response = requests.get(f"{base_url}/test", timeout=5.0)
@@ -51,20 +48,20 @@ def test_root_path(base_url: str):
     assert "Path: /" in response.text
 
 
-def _make_concurrent_request(request_id: int) -> tuple[int, str]:
+def make_concurrent_request(base_url: str, request_id: int) -> tuple[int, str]:
     """Helper function to make a request from a thread"""
-    response = requests.get(f"{SERVER_URL}/concurrent/{request_id}", timeout=5.0)
+    response = requests.get(f"{base_url}/concurrent/{request_id}", timeout=5.0)
     return response.status_code, response.text
 
 
-def test_concurrent_requests():
+def test_concurrent_requests(base_url: str):
     """Test multiple concurrent requests to demonstrate thread-per-request architecture"""
     num_requests = 5
 
     # Make concurrent requests using ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=num_requests) as executor:
         futures = [
-            executor.submit(_make_concurrent_request, i)
+            executor.submit(make_concurrent_request, base_url, i)
             for i in range(1, num_requests + 1)
         ]
         results = [future.result() for future in futures]
@@ -134,12 +131,12 @@ def test_keepalive_connection_reuse(base_url: str):
         # All should succeed - connection reuse is working
 
 
-def test_http_10_rejected():
+def test_http_10_rejected(server_port: int):
     """Test that HTTP/1.0 requests are rejected with 505 error"""
     # Create a raw HTTP/1.0 request
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(2.0)  # Set timeout to avoid hanging
-    sock.connect(("localhost", int(SERVER_PORT)))
+    sock.connect(("127.0.0.1", server_port))
 
     # Send HTTP/1.0 request
     request = b"GET /test HTTP/1.0\r\nHost: localhost\r\n\r\n"
@@ -203,12 +200,12 @@ def test_body_size_limit_just_under(base_url: str):
     assert f"Body length: {len(large_data)} bytes" in response.text
 
 
-def test_error_response_closes_connection():
+def test_error_response_closes_connection(server_port: int):
     """Test that error responses include Connection: close"""
     # Test with HTTP/1.0 which triggers an error
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(2.0)
-    sock.connect(("localhost", int(SERVER_PORT)))
+    sock.connect(("127.0.0.1", server_port))
 
     request = b"GET /test HTTP/1.0\r\nHost: localhost\r\n\r\n"
     sock.sendall(request)

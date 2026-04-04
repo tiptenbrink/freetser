@@ -49,9 +49,7 @@ def handler(req: Request, store_queue: StorageQueue | None) -> Response:
                         return f"Created: {item_id}\n", 200
                     else:
                         _, counter = result
-                        success = store.update(
-                            "USERS", item_id, value, counter, assert_updated=False
-                        )
+                        success = store.try_update("USERS", item_id, value, counter)
                         if success:
                             return f"Updated: {item_id}\n", 200
                         else:

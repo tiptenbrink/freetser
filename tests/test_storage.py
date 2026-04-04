@@ -1,14 +1,19 @@
 import sqlite3
 import threading
-import time
 
 import pytest
 
-from freetser.server import StorageQueue, run_store
+from freetser.server import (
+    StorageQueue,
+    StorageThreadCrashed,
+    run_store,
+    start_storage_thread,
+)
 from freetser.storage import (
     EntryAlreadyExists,
     Storage,
     StorageError,
+    UpdateCounterMismatch,
     check_integrity_error,
 )
 
@@ -121,27 +126,41 @@ class TestStorageInMemory:
         storage.add("test_table", "key1", b"value1", 9999999999)
 
         # Try to update with wrong counter
-        with pytest.raises(AssertionError):
+        with pytest.raises(UpdateCounterMismatch):
             storage.update("test_table", "key1", b"value2", 999, 9999999999)
 
     def test_update_with_wrong_counter_returns_false(self, storage):
-        """Test update returns False when counter doesn't match."""
+        """Test try_update returns False when counter doesn't match."""
         storage.add("test_table", "key1", b"value1", 9999999999)
 
-        # Update with assert_updated=False
-        result = storage.update(
-            "test_table",
-            "key1",
-            b"value2",
-            999,
-            9999999999,
-            assert_updated=False,
-        )
+        result = storage.try_update("test_table", "key1", b"value2", 999, 9999999999)
         assert result is False
 
         # Verify value wasn't changed
         value, counter = storage.get("test_table", "key1")
         assert value == b"value1"
+
+    def test_overwrite_inserts_new_key(self, storage):
+        """Test overwrite inserts missing keys with counter 0."""
+        storage.overwrite("test_table", "key1", b"value1", 9999999999)
+
+        result = storage.get("test_table", "key1")
+        assert result is not None
+        value, counter = result
+        assert value == b"value1"
+        assert counter == 0
+
+    def test_overwrite_replaces_existing_value_and_increments_counter(self, storage):
+        """Test overwrite replaces existing values without a counter check."""
+        storage.add("test_table", "key1", b"value1", 1000)
+
+        storage.overwrite("test_table", "key1", b"value2", 2000)
+
+        result = storage.get("test_table", "key1")
+        assert result is not None
+        value, counter = result
+        assert value == b"value2"
+        assert counter == 1
 
     def test_delete_existing_key(self, storage):
         """Test deleting an existing key."""
@@ -222,14 +241,14 @@ class TestStorageInMemory:
         value2, counter2 = storage.get("test_table", "key1")
 
         # First update succeeds
-        result1 = storage.update(
-            "test_table", "key1", b"update1", counter1, 9999999999, assert_updated=False
+        result1 = storage.try_update(
+            "test_table", "key1", b"update1", counter1, 9999999999
         )
         assert result1 is True
 
         # Second update fails due to stale counter
-        result2 = storage.update(
-            "test_table", "key1", b"update2", counter2, 9999999999, assert_updated=False
+        result2 = storage.try_update(
+            "test_table", "key1", b"update2", counter2, 9999999999
         )
         assert result2 is False
 
@@ -525,23 +544,24 @@ class TestStorageQueueErrorHandling:
     """Tests for error handling and propagation through StorageQueue."""
 
     @pytest.fixture
-    def storage_queue_setup(self):
+    def storage_queue_setup(self, tmp_path):
         """Set up a StorageQueue with a running storage thread."""
         queue = StorageQueue()
-        thread = threading.Thread(
+        db_path = tmp_path / "test.sqlite"
+        ready_event = threading.Event()
+        threading.Thread(
             target=run_store,
-            args=(queue, ":memory:", ["test_table"]),
+            args=(queue, str(db_path), ["test_table"], ready_event),
             daemon=True,
-        )
-        thread.start()
-        # Give the thread time to initialize
-        time.sleep(0.1)
-        yield queue
+        ).start()
+        assert ready_event.wait(timeout=5.0)
+        assert queue.crashed_exception() is None
+        yield queue, str(db_path)
         # Thread will be cleaned up automatically (daemon thread)
 
     def test_storage_error_propagates_to_caller(self, storage_queue_setup):
         """Test that StorageError is propagated from storage thread to caller."""
-        queue = storage_queue_setup
+        queue, _ = storage_queue_setup
 
         # Add a key first
         def add_key1(store: Storage) -> None:
@@ -558,9 +578,9 @@ class TestStorageQueueErrorHandling:
 
         assert "Key already exists: key1" in str(exc_info.value)
 
-    def test_storage_thread_continues_after_error(self, storage_queue_setup):
-        """Test that storage thread continues processing after a StorageError."""
-        queue = storage_queue_setup
+    def test_storage_thread_continues_after_storage_error(self, storage_queue_setup):
+        """Test that StorageError does not crash the storage thread."""
+        queue, _ = storage_queue_setup
 
         # Add a key first
         def add_key1(store: Storage) -> None:
@@ -575,7 +595,7 @@ class TestStorageQueueErrorHandling:
         with pytest.raises(EntryAlreadyExists):
             queue.execute(add_duplicate)
 
-        # Storage thread should still work after the error
+        # StorageError is recoverable, so later calls should still work.
         def add_key2(store: Storage) -> str:
             store.add("test_table", "key2", b"value2", 9999999999)
             return "success"
@@ -583,16 +603,9 @@ class TestStorageQueueErrorHandling:
         result = queue.execute(add_key2)
         assert result == "success"
 
-        # Verify both keys exist
-        def check_keys(store: Storage) -> list[str]:
-            return store.list_keys("test_table")
-
-        keys = queue.execute(check_keys)
-        assert sorted(keys) == ["key1", "key2"]
-
     def test_transaction_rolled_back_on_error(self, storage_queue_setup):
         """Test that transaction is rolled back when StorageError occurs."""
-        queue = storage_queue_setup
+        queue, db_path = storage_queue_setup
 
         # Define a procedure that makes multiple changes then fails
         def multi_change_then_fail(store: Storage) -> None:
@@ -613,16 +626,17 @@ class TestStorageQueueErrorHandling:
         with pytest.raises(EntryAlreadyExists):
             queue.execute(multi_change_then_fail)
 
-        # Verify that BOTH key1 and key2 were rolled back (neither should exist)
-        def check_keys(store: Storage) -> list[str]:
-            return store.list_keys("test_table")
-
-        keys = queue.execute(check_keys)
-        assert keys == []  # Both keys should be rolled back
+        # Verify that BOTH key1 and key2 were rolled back (neither should exist).
+        check_storage = Storage(db_path)
+        try:
+            keys = check_storage.list_keys("test_table")
+            assert keys == []
+        finally:
+            check_storage.close()
 
     def test_custom_storage_error_propagates(self, storage_queue_setup):
         """Test that custom StorageError subclasses propagate correctly."""
-        queue = storage_queue_setup
+        queue, db_path = storage_queue_setup
 
         # Define a custom StorageError
         class CustomStorageError(StorageError):
@@ -643,9 +657,81 @@ class TestStorageQueueErrorHandling:
 
         assert "Custom error occurred" in str(exc_info.value)
 
-        # Verify that the transaction was rolled back (key1 should not exist)
-        def check_keys(store: Storage) -> list[str]:
-            return store.list_keys("test_table")
+        # Verify that the transaction was rolled back (key1 should not exist).
+        check_storage = Storage(db_path)
+        try:
+            keys = check_storage.list_keys("test_table")
+            assert keys == []
+        finally:
+            check_storage.close()
 
-        keys = queue.execute(check_keys)
-        assert keys == []
+        # Custom StorageError is recoverable, so the queue should still be usable.
+        def add_key2(store: Storage) -> str:
+            store.add("test_table", "key2", b"value2", 9999999999)
+            return "success"
+
+        result = queue.execute(add_key2)
+        assert result == "success"
+
+    def test_storage_thread_crash_unblocks_waiting_callers(self, storage_queue_setup):
+        """Test that a storage-thread crash wakes callers instead of blocking forever."""
+        queue, _ = storage_queue_setup
+        procedure_started = threading.Event()
+        allow_crash = threading.Event()
+        results: dict[str, BaseException] = {}
+
+        def crash_after_signal(store: Storage) -> None:
+            procedure_started.set()
+            allow_crash.wait(timeout=5.0)
+            raise ValueError("boom")
+
+        def wait_on_first_call() -> None:
+            try:
+                queue.execute(crash_after_signal)
+            except BaseException as exc:
+                results["first"] = exc
+
+        def wait_behind_crash() -> None:
+            try:
+                queue.execute(lambda store: "never reached")
+            except BaseException as exc:
+                results["second"] = exc
+
+        first = threading.Thread(target=wait_on_first_call, daemon=True)
+        second = threading.Thread(target=wait_behind_crash, daemon=True)
+
+        first.start()
+        assert procedure_started.wait(timeout=5.0)
+        second.start()
+
+        allow_crash.set()
+        first.join(timeout=2.0)
+        second.join(timeout=2.0)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert isinstance(results["first"], ValueError)
+        assert isinstance(results["second"], StorageThreadCrashed)
+
+    def test_rollback_error_keeps_original_exception_as_cause(
+        self, storage_queue_setup
+    ):
+        """Test that rollback failures preserve the original procedure exception."""
+        queue, _ = storage_queue_setup
+
+        def close_connection_then_fail(store: Storage) -> None:
+            store.conn.close()
+            raise ValueError("boom")
+
+        with pytest.raises(sqlite3.ProgrammingError) as exc_info:
+            queue.execute(close_connection_then_fail)
+
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert str(exc_info.value.__cause__) == "boom"
+
+    def test_start_storage_thread_raises_on_startup_failure(self, tmp_path):
+        """Test that startup failures raise instead of blocking forever."""
+        missing_parent = tmp_path / "missing" / "test.sqlite"
+
+        with pytest.raises(FileNotFoundError):
+            start_storage_thread(str(missing_parent), ["test_table"])

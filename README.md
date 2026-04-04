@@ -145,8 +145,14 @@ store.get(table: str, key: str, timestamp=None) -> tuple[bytes, int] | None
 # Add a new key (raises EntryAlreadyExists if key exists)
 store.add(table: str, key: str, value: bytes, expires_at=0, timestamp=None) -> None
 
-# Update existing key with optimistic locking (counter must match)
-store.update(table: str, key: str, value: bytes, counter: int, expires_at=0) -> bool
+# Update existing key with optimistic locking (raises on counter mismatch)
+store.update(table: str, key: str, value: bytes, counter: int, expires_at=0) -> None
+
+# Try to update existing key with optimistic locking
+store.try_update(table: str, key: str, value: bytes, counter: int, expires_at=0) -> bool
+
+# Overwrite without checking the counter (insert if missing)
+store.overwrite(table: str, key: str, value: bytes, expires_at=0) -> None
 
 # Delete a key
 store.delete(table: str, key: str) -> bool
@@ -158,7 +164,9 @@ store.list_keys(table: str) -> list[str]
 store.clear(table: str) -> None
 ```
 
-The `counter` field enables optimistic locking. Since procedures run sequentially on a single thread, there are no race conditions *within* a procedure. However, if you read a value, return to the handler to do external work (like an HTTP call), and then update in a *separate* procedure call, another request's procedure may have modified the value in between. Pass the counter to `update()` to detect this—if it doesn't match, the update fails and returns `False`.
+The `counter` field enables optimistic locking. Since procedures run sequentially on a single thread, there are no race conditions *within* a procedure. However, if you read a value, return to the handler to do external work (like an HTTP call), and then update in a *separate* procedure call, another request's procedure may have modified the value in between. Use `try_update()` when a stale counter is part of normal control flow and you want a `bool` result. Use `update()` when a stale counter should be treated as an exception via `UpdateCounterMismatch`.
+
+`overwrite()` is different: it inserts missing keys, and if the key already exists it replaces the stored value and expiration without checking the counter. When overwriting an existing key it still increments the counter, so readers can observe that the row changed. Use it for cache rows, indexes, or other derived data where the latest write should simply win. Do not use it when you need to detect that another callback changed an important value in between.
 
 The `expires_at` and `timestamp` parameters enable TTL-based expiration. Set `expires_at` to a Unix timestamp when adding/updating, then pass the current timestamp when getting to filter expired entries.
 
@@ -166,9 +174,19 @@ The `expires_at` and `timestamp` parameters enable TTL-based expiration. Set `ex
 
 1. **Keep routines simple**: The storage thread is single-threaded. Don't make HTTP calls or perform heavy computation inside storage routines.
 
-2. **Handle errors in the handler**: Return error values from routines instead of raising exceptions. Raise exceptions in the handler where they won't crash the storage thread.
+2. **Use `overwrite()` only for last-writer-wins data**: `overwrite()` is useful for derived rows such as caches or indexes when you are intentionally replacing whatever was there before. If another callback's change would be important, do not use `overwrite()`.
 
-3. **Use optimistic locking for split operations**: When you need to read, do external work, then update, use the counter to detect concurrent modifications:
+```python
+def refresh_profile_cache(store: Storage, user_id: str, profile_bytes: bytes) -> None:
+    # Cache data is derived state. We intentionally want the latest write to win.
+    store.overwrite("CACHE", f"profile:{user_id}", profile_bytes, expires_at=300)
+```
+
+3. **Use `try_update()` for expected conflicts**: If a counter mismatch is part of normal request handling, use `try_update()` and handle the `False` result in the handler. Reserve `update()` for situations where a mismatch is truly exceptional.
+
+4. **`StorageError` is recoverable, other exceptions are fatal**: If a procedure raises a `StorageError` such as `EntryAlreadyExists` or `UpdateCounterMismatch`, the storage thread rolls back, `execute()` raises that exception to the caller, and the storage thread continues. If a procedure raises any other exception, the storage thread rolls back, the triggering `execute()` call raises that exception, and the storage thread stops. Later calls to `execute()` raise `StorageThreadCrashed`. If rollback itself fails, that rollback error is raised and chained from the original procedure error.
+
+5. **Use optimistic locking for split operations**: When you need to read, do external work, then update, use the counter to detect concurrent modifications:
 
 ```python
 def handler(req: Request, store_queue: StorageQueue) -> Response:
@@ -187,7 +205,7 @@ def handler(req: Request, store_queue: StorageQueue) -> Response:
 
     # Second procedure: update only if counter still matches
     def save_data(store: Storage):
-        return store.update("DATA", "key", new_value, counter)
+        return store.try_update("DATA", "key", new_value, counter)
 
     if store_queue.execute(save_data):
         return Response.text("Updated")
@@ -250,7 +268,7 @@ def handler(req: Request, store_queue) -> Response:
 ### Error handling
 
 ```python
-from freetser import StorageError, EntryAlreadyExists
+from freetser import EntryAlreadyExists, StorageThreadCrashed
 
 def handler(req: Request, store_queue) -> Response:
     try:
@@ -263,9 +281,53 @@ def handler(req: Request, store_queue) -> Response:
 
     except EntryAlreadyExists:
         return Response.text("User already exists", status_code=409)
-    except StorageError as e:
-        return Response.text(f"Storage error: {e}", status_code=500)
+    except StorageThreadCrashed:
+        return Response.text("Storage thread crashed", status_code=500)
 ```
+
+If a procedure raises a `StorageError`, that exception is raised back out of `store_queue.execute()` and the storage thread continues running. If a procedure raises any other exception, that exception is raised back out of `store_queue.execute()`, and after that the storage thread is no longer usable and future calls raise `StorageThreadCrashed`. For normal control flow, returning status values from the procedure or using non-throwing APIs like `try_update()` is often still clearer.
+
+### Fatal Procedure Errors
+
+Avoid raising plain exceptions from storage procedures for normal control flow. A non-`StorageError` is treated as a bug or broken invariant:
+
+1. The current transaction is rolled back.
+2. The `execute()` call that triggered the problem raises the original exception.
+3. Any callers already queued behind it wake up and raise `StorageThreadCrashed`.
+4. Future calls to `execute()` immediately raise `StorageThreadCrashed`.
+
+```python
+import threading
+from freetser import Storage, StorageQueue, StorageThreadCrashed
+
+def demonstrate_fatal_error(store_queue: StorageQueue) -> None:
+    procedure_started = threading.Event()
+    allow_crash = threading.Event()
+
+    def crash(store: Storage) -> None:
+        procedure_started.set()
+        allow_crash.wait()
+        raise ValueError("bug in procedure")
+
+    def first_caller() -> None:
+        try:
+            store_queue.execute(crash)
+        except ValueError:
+            print("first caller got the original exception")
+
+    def second_caller() -> None:
+        procedure_started.wait()
+        try:
+            store_queue.execute(lambda store: "never runs")
+        except StorageThreadCrashed:
+            print("second caller woke up after the crash")
+
+    threading.Thread(target=first_caller, daemon=True).start()
+    threading.Thread(target=second_caller, daemon=True).start()
+    allow_crash.set()
+```
+
+In that example, the second caller does not block forever. It is waiting on its own `execute()` call, notices that the storage thread died, and is woken up with `StorageThreadCrashed`. That is why plain exceptions inside procedures should be reserved for actual bugs or irrecoverable invariants, not expected request outcomes.
 
 ## Development
 
@@ -275,25 +337,21 @@ uv run ruff format     # Code formatting
 uv run ty check        # Type checking
 ```
 
-Run tests (start the test server in one terminal, then run pytest in another):
+Run tests:
 
 ```bash
-# Terminal 1: start the test server
-uv run python tests/main.py     # optionally pass a port number
-
-# Terminal 2: run tests
-uv run pytest tests/
+uv run pytest
 ```
 
 ## Benchmarks
 
-In some basic stress testing on a local machine, we found that requests basically always take around 41-42 ms, giving a basic 25 requests per second. Note that we always perform at least a single SQLite operation, so every request has to go through the database thread.
+In some basic stress testing on a local machine and with TCP_NODELAY and default settings, average request latency is sub-ms with a mix of reads, updates and deletes (1:1:1 ratio) achieving 6k requests per second with a single connection thread. Note that on a local machine, if TCP_NODELAY is not set a request would basically always take at least 40ms on my machine, although when using >100 threads throughput was usually better, although again not always. Using default settings should be fine when you are using freetser for what it was designed: low-concurrency web servers with modest traffic. 
 
-However, throughput can rise all the way to 5500 requests per second (using 300 request threads firing off requests on a keep-alive connection) without any real hit to latency, with requests still taking around 43 ms to complete on average (and at most 160 ms, hats off to the OS scheduler). From that point on, average request times start to climb as you add threads.
+However, throughput can rise all the way to 20,000 requests per second (using 100 request threads firing off requests on a keep-alive connection), although average request-response times climb to 5ms.
 
-Using 750 threads, throughput reaches 10,000 requests per second with an average request taking 53 ms. Using 1000 threads barely helps as throughput starts to level off rapidly, reaching 10,900 requests per second. 1200 threads wasn't possible to test without tuning OS settings.
+When using more than 100 threads, contention starts to become a serious problem and request throughput starts to fall, although note that in this simple benchmark we're just logging every request to the terminal as well, I did not do extensive investigation to reduce bottlenecks.
 
-Benchmark machine specs: Intel Core Ultra 7 155H (22 vCPUs), Linux 6.17, 32GB LPDDR5x-7467 memory
+Benchmark machine specs: Intel Core Ultra 7 155H (22 vCPUs), Linux 6.18, 32GB LPDDR5x-7467 memory
 
 ## Background
 
@@ -301,4 +359,4 @@ I wanted to minimize dependencies and use the standard library's sqlite3 interfa
 
 Most of all, I wanted a project where everyone can read the code and understand what it's doing, while also providing a built-in storage mechanism so you can use it for small-scale production use cases.
 
-[Claude Code](https://github.com/anthropics/claude-code) with Opus 4.5 was used significantly in the development of freetser. All architectural decisions were made by a human, and all code has been reviewed and vetted by a human.
+Claude Code (Opus 4.5, 4.6) and Codex (GPT 5.4) were used significantly in the development of freetser. All architectural decisions were made by a human, and all code has been reviewed and vetted by a human.

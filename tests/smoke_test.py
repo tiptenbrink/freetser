@@ -9,10 +9,12 @@ def test_imports() -> None:
         Response,
         ServerConfig,
         Storage,
+        StorageThreadCrashed,
         StorageError,
         StorageQueue,
         TcpServerConfig,
         UnixServerConfig,
+        UpdateCounterMismatch,
         setup_logging,
         start_server,
         start_storage_thread,
@@ -29,8 +31,10 @@ def test_imports() -> None:
     assert isinstance(Request, type)
     assert isinstance(Response, type)
     assert isinstance(Storage, type)
+    assert isinstance(StorageThreadCrashed, type)
     assert isinstance(StorageError, type)
     assert isinstance(EntryAlreadyExists, type)
+    assert isinstance(UpdateCounterMismatch, type)
 
 
 if __name__ == "__main__":

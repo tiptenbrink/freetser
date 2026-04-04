@@ -1,13 +1,16 @@
 [build-system]
-requires = ["uv_build>=0.9.11,<0.11.0"]
+requires = ["uv_build>=0.9.11,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+exclude-newer = "3 days"
 
 [tool.uv.build-backend]
 source-include = ["CHANGELOG.md"]
 
 [project]
 name = "freetser"
-version = "0.4.1"
+version = "0.5.0"
 description = "A free-threaded HTTP server built on top of h11"
 authors = [
     { name = "Tip ten Brink", email = "tip@tenbrinkmeijs.com" },
@@ -24,7 +27,7 @@ dev = [
     "pytest>=9.0.1",
     "requests>=2.32.0",
     "ruff>=0.15.0",
-    "ty>=0.0.17",
+    "ty>=0.0.27",
 ]
 
 [tool.ruff]

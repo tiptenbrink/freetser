@@ -5,6 +5,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+import pytest
+
 from freetser import (
     Request,
     Response,
@@ -18,6 +20,26 @@ def simple_handler(req: Request, store_queue: StorageQueue | None) -> Response:
     return Response.text(f"Hello from {req.path}!")
 
 
+def start_test_unix_server(config: UnixServerConfig) -> None:
+    ready_event = threading.Event()
+    startup_exception: list[BaseException] = []
+
+    def run_server() -> None:
+        try:
+            start_server(config, simple_handler, ready_event=ready_event)
+        except BaseException as exc:
+            startup_exception.append(exc)
+            ready_event.set()
+
+    threading.Thread(target=run_server, daemon=True).start()
+    assert ready_event.wait(timeout=30)
+
+    if startup_exception:
+        if isinstance(startup_exception[0], PermissionError):
+            pytest.skip("Unix domain sockets are not permitted in this environment")
+        raise startup_exception[0]
+
+
 class TestUnixSocket:
     """Tests for Unix domain socket server."""
 
@@ -27,15 +49,7 @@ class TestUnixSocket:
             socket_path = Path(tmpdir) / "test.sock"
             config = UnixServerConfig(path=str(socket_path))
 
-            ready_event = threading.Event()
-            server_thread = threading.Thread(
-                target=start_server,
-                args=(config, simple_handler),
-                kwargs={"ready_event": ready_event},
-                daemon=True,
-            )
-            server_thread.start()
-            ready_event.wait(timeout=30)
+            start_test_unix_server(config)
 
             # Connect via Unix socket and send HTTP request
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -64,15 +78,7 @@ class TestUnixSocket:
             socket_path = Path(tmpdir) / "test.sock"
             config = UnixServerConfig(path=str(socket_path))
 
-            ready_event = threading.Event()
-            server_thread = threading.Thread(
-                target=start_server,
-                args=(config, simple_handler),
-                kwargs={"ready_event": ready_event},
-                daemon=True,
-            )
-            server_thread.start()
-            ready_event.wait(timeout=5)
+            start_test_unix_server(config)
 
             # Socket file should exist
             assert socket_path.exists()
@@ -88,17 +94,7 @@ class TestUnixSocket:
 
             config = UnixServerConfig(path=str(socket_path))
 
-            ready_event = threading.Event()
-            server_thread = threading.Thread(
-                target=start_server,
-                args=(config, simple_handler),
-                kwargs={"ready_event": ready_event},
-                daemon=True,
-            )
-            server_thread.start()
-
-            # Server should start successfully despite existing file
-            assert ready_event.wait(timeout=5)
+            start_test_unix_server(config)
 
     def test_unix_socket_keepalive(self):
         """Test that keep-alive works on Unix sockets."""
@@ -106,15 +102,7 @@ class TestUnixSocket:
             socket_path = Path(tmpdir) / "test.sock"
             config = UnixServerConfig(path=str(socket_path))
 
-            ready_event = threading.Event()
-            server_thread = threading.Thread(
-                target=start_server,
-                args=(config, simple_handler),
-                kwargs={"ready_event": ready_event},
-                daemon=True,
-            )
-            server_thread.start()
-            ready_event.wait(timeout=5)
+            start_test_unix_server(config)
 
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
