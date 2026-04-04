@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+
 def test_simple_get_request(base_url: str):
     """Test a simple GET request"""
     response = requests.get(f"{base_url}/test", timeout=5.0)

@@ -356,7 +356,9 @@ class StorageQueue:
         """Execute the given function on the storage thread."""
         crashed_exception = self.crashed_exception()
         if crashed_exception is not None:
-            raise StorageThreadCrashed("Storage thread has crashed") from crashed_exception
+            raise StorageThreadCrashed(
+                "Storage thread has crashed"
+            ) from crashed_exception
 
         item: QueueItem[T] = QueueItem(procedure=procedure)
         self.queue.put(item)

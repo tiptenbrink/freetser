@@ -246,6 +246,7 @@ def test_readme_error_handling_example(tmp_path):
 
     def handler(req: Request, store_queue: StorageQueue) -> Response:
         try:
+
             def create_user(store: Storage):
                 store.add("USERS", req.body.decode(), b"{}", 0)
                 return "created"
